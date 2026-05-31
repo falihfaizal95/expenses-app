@@ -1,1 +1,1 @@
-{"name":"expenses-tracker","dependencies":{"@vercel/kv":"^1.0.0"}}
+{"name":"expenses-tracker","dependencies":{"@upstash/redis":"^1.34.0"}}
