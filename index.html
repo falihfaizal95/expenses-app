@@ -39,7 +39,7 @@
   .bar-track{flex:1;background:var(--surface2);border-radius:2px;height:8px;overflow:hidden;}
   .bar-fill{height:100%;border-radius:2px;transition:width 0.4s cubic-bezier(.4,0,.2,1);}
   .bar-amt{font-size:11px;color:var(--text);width:52px;text-align:right;}
-  .main{padding:24px 32px;display:flex;flex-direction:column;gap:16px;}
+  .main{padding:24px 32px;display:flex;flex-direction:column;gap:32px;overflow-y:auto;}
   .toolbar{display:flex;gap:8px;align-items:center;}
   .toolbar select{width:auto;font-size:12px;padding:6px 10px;}
   .count{margin-left:auto;font-size:11px;color:var(--muted);}
@@ -54,12 +54,26 @@
   .cat-pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;border:1px solid;}
   .empty-row td{text-align:center;padding:48px;color:var(--muted);font-style:italic;}
   ::-webkit-scrollbar{width:6px;height:6px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+
+  /* month section */
+  .month-section{display:flex;flex-direction:column;gap:16px;}
+  .month-header{display:flex;align-items:baseline;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+  .month-name{font-size:15px;font-weight:500;color:var(--text);letter-spacing:-0.01em;}
+  .month-total{font-size:13px;color:var(--accent);margin-left:auto;}
+  .month-count{font-size:11px;color:var(--muted);}
+  .month-body{display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:start;}
+  .pie-wrap{display:flex;flex-direction:column;align-items:center;gap:12px;}
+  .pie-legend{width:100%;display:flex;flex-direction:column;gap:5px;}
+  .legend-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);}
+  .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .legend-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .legend-pct{color:var(--text);min-width:32px;text-align:right;}
 </style>
 </head>
 <body>
 <header>
   <div class="logo">$ expenses</div>
-  <div class="subtitle">texas internship · summer 2025</div>
+  <div class="subtitle">texas internship · summer 2026</div>
   <div class="sync-status"><div class="sync-dot" id="syncDot"></div><span id="syncLabel">loading...</span></div>
 </header>
 <div class="layout">
@@ -88,36 +102,185 @@
       <button class="add-btn" id="addBtn" onclick="addExpense()">+ log expense</button>
       <div class="err" id="err">please fill in all fields.</div>
     </div>
-    <div><div class="section-title">by category</div><div id="barChart"></div></div>
+    <div><div class="section-title">all time · by category</div><div id="barChart"></div></div>
   </aside>
-  <main class="main">
-    <div class="toolbar">
-      <select id="filterCat" onchange="renderTable()"><option value="">all categories</option></select>
-      <select id="sortBy" onchange="renderTable()">
-        <option value="date-desc">newest first</option><option value="date-asc">oldest first</option>
-        <option value="amount-desc">highest amount</option><option value="amount-asc">lowest amount</option>
-      </select>
-      <span class="count" id="entryCount">0 entries</span>
+  <main class="main" id="mainContent"></main>
+</div>
+<script>
+const CC={'🏠 Housing':{fill:'#378ADD22',border:'#378ADD',text:'#7ab8f5',pie:'#378ADD'},'🍔 Food & Dining':{fill:'#D85A3022',border:'#D85A30',text:'#f0956a',pie:'#D85A30'},'🚗 Transportation':{fill:'#1D9E7522',border:'#1D9E75',text:'#4dd4a0',pie:'#1D9E75'},'🛒 Groceries':{fill:'#63992222',border:'#639922',text:'#95d44a',pie:'#639922'},'🎉 Entertainment':{fill:'#7F77DD22',border:'#7F77DD',text:'#aaa4f0',pie:'#7F77DD'},'👕 Clothing':{fill:'#D4537E22',border:'#D4537E',text:'#f089b0',pie:'#D4537E'},'💊 Health':{fill:'#E24B4A22',border:'#E24B4A',text:'#f07575',pie:'#E24B4A'},'📱 Phone & Internet':{fill:'#BA751722',border:'#BA7517',text:'#e0a045',pie:'#BA7517'},'✈️ Travel':{fill:'#534AB722',border:'#534AB7',text:'#8880d8',pie:'#534AB7'},'🧾 Utilities':{fill:'#88878022',border:'#888780',text:'#aaa',pie:'#888780'},'🛍️ Shopping':{fill:'#993C1D22',border:'#993C1D',text:'#c86040',pie:'#993C1D'},'💡 Other':{fill:'#5F5E5A22',border:'#5F5E5A',text:'#888',pie:'#5F5E5A'}};
+const BC=['#c8f060','#f0c060','#60c8f0','#f060c8','#60f0c8','#c860f0','#f09060','#60f090'];
+const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+let expenses=[],busy=false;
+
+function setSync(s,l){document.getElementById('syncDot').className='sync-dot '+s;document.getElementById('syncLabel').textContent=l;}
+
+async function load(){
+  setSync('loading','syncing...');
+  try{
+    const r=await fetch('/api/expenses');
+    if(!r.ok)throw 0;
+    expenses=await r.json();
+    setSync('ok','saved');
+    render();
+  }catch{
+    setSync('err','offline');
+    try{const d=localStorage.getItem('tx_expenses');if(d)expenses=JSON.parse(d);}catch{}
+    render();
+    setTimeout(load,4000);
+  }
+}
+
+async function addExpense(){
+  if(busy)return;
+  const desc=document.getElementById('desc').value.trim(),
+        amt=parseFloat(document.getElementById('amount').value),
+        date=document.getElementById('date').value,
+        cat=document.getElementById('category').value,
+        err=document.getElementById('err');
+  if(!desc||isNaN(amt)||amt<=0||!date||!cat){err.style.display='block';return;}
+  err.style.display='none';
+  const e={id:Date.now(),desc,amt,date,cat};
+  busy=true;
+  document.getElementById('addBtn').disabled=true;
+  setSync('loading','saving...');
+  try{
+    const r=await fetch('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(e)});
+    if(!r.ok)throw 0;
+    expenses=await r.json();
+    localStorage.setItem('tx_expenses',JSON.stringify(expenses));
+    setSync('ok','saved');
+    document.getElementById('desc').value='';
+    document.getElementById('amount').value='';
+    document.getElementById('category').value='';
+    render();
+  }catch{
+    expenses.unshift(e);
+    localStorage.setItem('tx_expenses',JSON.stringify(expenses));
+    setSync('err','saved locally');
+    render();
+  }finally{
+    busy=false;
+    document.getElementById('addBtn').disabled=false;
+  }
+}
+
+async function deleteExpense(id){
+  if(!confirm('Delete?'))return;
+  setSync('loading','deleting...');
+  try{
+    const r=await fetch('/api/expenses?id='+id,{method:'DELETE'});
+    if(!r.ok)throw 0;
+    expenses=await r.json();
+    localStorage.setItem('tx_expenses',JSON.stringify(expenses));
+    setSync('ok','saved');
+    render();
+  }catch{
+    expenses=expenses.filter(e=>String(e.id)!==String(id));
+    localStorage.setItem('tx_expenses',JSON.stringify(expenses));
+    setSync('err','removed locally');
+    render();
+  }
+}
+
+function fmt(n){return'$'+n.toFixed(2);}
+
+function makePie(catTotals,size){
+  const total=Object.values(catTotals).reduce((s,v)=>s+v,0);
+  if(!total)return'';
+  const entries=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]);
+  const cx=size/2,cy=size/2,r=size/2-2;
+  let angle=-Math.PI/2;
+  const slices=entries.map(([cat,amt])=>{
+    const slice=2*Math.PI*(amt/total);
+    const x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
+    angle+=slice;
+    const x2=cx+r*Math.cos(angle),y2=cy+r*Math.sin(angle);
+    const large=slice>Math.PI?1:0;
+    const color=(CC[cat]||{pie:'#555'}).pie;
+    const d=`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z`;
+    return`<path d="${d}" fill="${color}" stroke="#0e0e0e" stroke-width="1.5"/>`;
+  });
+  return`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${slices.join('')}</svg>`;
+}
+
+function makeLegend(catTotals){
+  const total=Object.values(catTotals).reduce((s,v)=>s+v,0);
+  return Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>{
+    const color=(CC[cat]||{pie:'#555'}).pie;
+    const pct=total?Math.round(amt/total*100):0;
+    const label=cat.split(' ').slice(1).join(' ');
+    return`<div class="legend-row"><div class="legend-dot" style="background:${color}"></div><span class="legend-label" title="${cat}">${label}</span><span class="legend-pct">${pct}%</span></div>`;
+  }).join('');
+}
+
+function render(){
+  // sidebar stats
+  const t=expenses.reduce((s,e)=>s+e.amt,0);
+  const now=new Date();
+  const m=expenses.filter(e=>{const d=new Date(e.date+'T00:00:00');return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,e)=>s+e.amt,0);
+  const ct={};expenses.forEach(e=>{ct[e.cat]=(ct[e.cat]||0)+e.amt;});
+  const top=Object.entries(ct).sort((a,b)=>b[1]-a[1])[0];
+  document.getElementById('statTotal').textContent=fmt(t);
+  document.getElementById('statMonth').textContent=fmt(m);
+  document.getElementById('statCount').textContent=expenses.length;
+  document.getElementById('statTop').textContent=top?top[0]:'—';
+
+  // sidebar bar chart
+  const sorted=Object.entries(ct).sort((a,b)=>b[1]-a[1]),max=sorted[0]?.[1]||1;
+  const bc=document.getElementById('barChart');
+  bc.innerHTML=sorted.length?sorted.map(([c,a],i)=>`<div class="bar-row"><span class="bar-cat" title="${c}">${c.split(' ').slice(1).join(' ')}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.round(a/max*100)}%;background:${BC[i%BC.length]};"></div></div><span class="bar-amt">${fmt(a)}</span></div>`).join(''):'<div style="color:#555;font-size:12px;font-style:italic;">no data yet</div>';
+
+  // group by month
+  const byMonth={};
+  expenses.forEach(e=>{
+    const d=new Date(e.date+'T00:00:00');
+    const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if(!byMonth[key])byMonth[key]=[];
+    byMonth[key].push(e);
+  });
+
+  const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+  const main=document.getElementById('mainContent');
+
+  if(!monthKeys.length){
+    main.innerHTML='<div style="color:var(--muted);font-style:italic;padding:48px;text-align:center;">no expenses yet</div>';
+    return;
+  }
+
+  main.innerHTML=monthKeys.map(key=>{
+    const [yr,mo]=key.split('-');
+    const label=`${MONTH_NAMES[parseInt(mo)-1]} ${yr}`;
+    const list=[...byMonth[key]].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const monthTotal=list.reduce((s,e)=>s+e.amt,0);
+    const catTotals={};list.forEach(e=>{catTotals[e.cat]=(catTotals[e.cat]||0)+e.amt;});
+
+    const rows=list.map(e=>{
+      const c=CC[e.cat]||{fill:'#33333322',border:'#555',text:'#888'};
+      return`<tr><td style="color:var(--muted)">${e.date}</td><td>${e.desc}</td><td><span class="cat-pill" style="background:${c.fill};border-color:${c.border};color:${c.text}">${e.cat}</span></td><td class="td-amt">${fmt(e.amt)}</td><td><button class="del-btn" onclick="deleteExpense(${e.id})">×</button></td></tr>`;
+    }).join('');
+
+    return`<div class="month-section">
+  <div class="month-header">
+    <span class="month-name">${label}</span>
+    <span class="month-count">${list.length} entr${list.length===1?'y':'ies'}</span>
+    <span class="month-total">${fmt(monthTotal)}</span>
+  </div>
+  <div class="month-body">
+    <div class="pie-wrap">
+      ${makePie(catTotals,160)}
+      <div class="pie-legend">${makeLegend(catTotals)}</div>
     </div>
     <div style="overflow-x:auto">
       <table>
         <thead><tr><th>date</th><th>description</th><th>category</th><th style="text-align:right">amount</th><th></th></tr></thead>
-        <tbody id="tableBody"></tbody>
+        <tbody>${rows}</tbody>
       </table>
     </div>
-  </main>
-</div>
-<script>
-const CC={'🏠 Housing':{fill:'#378ADD22',border:'#378ADD',text:'#7ab8f5'},'🍔 Food & Dining':{fill:'#D85A3022',border:'#D85A30',text:'#f0956a'},'🚗 Transportation':{fill:'#1D9E7522',border:'#1D9E75',text:'#4dd4a0'},'🛒 Groceries':{fill:'#63992222',border:'#639922',text:'#95d44a'},'🎉 Entertainment':{fill:'#7F77DD22',border:'#7F77DD',text:'#aaa4f0'},'👕 Clothing':{fill:'#D4537E22',border:'#D4537E',text:'#f089b0'},'💊 Health':{fill:'#E24B4A22',border:'#E24B4A',text:'#f07575'},'📱 Phone & Internet':{fill:'#BA751722',border:'#BA7517',text:'#e0a045'},'✈️ Travel':{fill:'#534AB722',border:'#534AB7',text:'#8880d8'},'🧾 Utilities':{fill:'#88878022',border:'#888780',text:'#aaa'},'🛍️ Shopping':{fill:'#993C1D22',border:'#993C1D',text:'#c86040'},'💡 Other':{fill:'#5F5E5A22',border:'#5F5E5A',text:'#888'}};
-const BC=['#c8f060','#f0c060','#60c8f0','#f060c8','#60f0c8','#c860f0','#f09060','#60f090'];
-let expenses=[],busy=false;
-function setSync(s,l){document.getElementById('syncDot').className='sync-dot '+s;document.getElementById('syncLabel').textContent=l;}
-async function load(){setSync('loading','syncing...');try{const r=await fetch('/api/expenses');if(!r.ok)throw 0;expenses=await r.json();setSync('ok','saved');render();}catch{setSync('err','offline');try{const d=localStorage.getItem('tx_expenses');if(d)expenses=JSON.parse(d);}catch{}render();setTimeout(load,4000);}}
-async function addExpense(){if(busy)return;const desc=document.getElementById('desc').value.trim(),amt=parseFloat(document.getElementById('amount').value),date=document.getElementById('date').value,cat=document.getElementById('category').value,err=document.getElementById('err');if(!desc||isNaN(amt)||amt<=0||!date||!cat){err.style.display='block';return;}err.style.display='none';const e={id:Date.now(),desc,amt,date,cat};busy=true;document.getElementById('addBtn').disabled=true;setSync('loading','saving...');try{const r=await fetch('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(e)});if(!r.ok)throw 0;expenses=await r.json();localStorage.setItem('tx_expenses',JSON.stringify(expenses));setSync('ok','saved');document.getElementById('desc').value='';document.getElementById('amount').value='';document.getElementById('category').value='';render();}catch{expenses.unshift(e);localStorage.setItem('tx_expenses',JSON.stringify(expenses));setSync('err','saved locally');render();}finally{busy=false;document.getElementById('addBtn').disabled=false;}}
-async function deleteExpense(id){if(!confirm('Delete?'))return;setSync('loading','deleting...');try{const r=await fetch('/api/expenses?id='+id,{method:'DELETE'});if(!r.ok)throw 0;expenses=await r.json();localStorage.setItem('tx_expenses',JSON.stringify(expenses));setSync('ok','saved');render();}catch{expenses=expenses.filter(e=>String(e.id)!==String(id));localStorage.setItem('tx_expenses',JSON.stringify(expenses));setSync('err','removed locally');render();}}
-function fmt(n){return'$'+n.toFixed(2);}
-function render(){const t=expenses.reduce((s,e)=>s+e.amt,0),now=new Date(),m=expenses.filter(e=>{const d=new Date(e.date+'T00:00:00');return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,e)=>s+e.amt,0),ct={};expenses.forEach(e=>{ct[e.cat]=(ct[e.cat]||0)+e.amt;});const top=Object.entries(ct).sort((a,b)=>b[1]-a[1])[0];document.getElementById('statTotal').textContent=fmt(t);document.getElementById('statMonth').textContent=fmt(m);document.getElementById('statCount').textContent=expenses.length;document.getElementById('statTop').textContent=top?top[0]:'—';const sorted=Object.entries(ct).sort((a,b)=>b[1]-a[1]),max=sorted[0]?.[1]||1,bc=document.getElementById('barChart');bc.innerHTML=sorted.length?sorted.map(([c,a],i)=>`<div class="bar-row"><span class="bar-cat" title="${c}">${c.split(' ').slice(1).join(' ')}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.round(a/max*100)}%;background:${BC[i%BC.length]};"></div></div><span class="bar-amt">${fmt(a)}</span></div>`).join(''):'<div style="color:#555;font-size:12px;font-style:italic;">no data yet</div>';const cats=[...new Set(expenses.map(e=>e.cat))],sel=document.getElementById('filterCat'),cur=sel.value;sel.innerHTML='<option value="">all categories</option>'+cats.map(c=>`<option ${c===cur?'selected':''}>${c}</option>`).join('');renderTable();}
-function renderTable(){const fc=document.getElementById('filterCat').value,sb=document.getElementById('sortBy').value;let list=expenses.filter(e=>!fc||e.cat===fc);list.sort((a,b)=>sb==='date-desc'?new Date(b.date)-new Date(a.date):sb==='date-asc'?new Date(a.date)-new Date(b.date):sb==='amount-desc'?b.amt-a.amt:a.amt-b.amt);document.getElementById('entryCount').textContent=list.length+' entr'+(list.length===1?'y':'ies');const tb=document.getElementById('tableBody');tb.innerHTML=list.length?list.map(e=>{const c=CC[e.cat]||{fill:'#33333322',border:'#555',text:'#888'};return`<tr><td style="color:var(--muted)">${e.date}</td><td>${e.desc}</td><td><span class="cat-pill" style="background:${c.fill};border-color:${c.border};color:${c.text}">${e.cat}</span></td><td class="td-amt">${fmt(e.amt)}</td><td><button class="del-btn" onclick="deleteExpense(${e.id})">×</button></td></tr>`;}).join(''):'<tr class="empty-row"><td colspan="5">no expenses yet</td></tr>';}
+  </div>
+</div>`;
+  }).join('');
+}
+
 document.getElementById('date').valueAsDate=new Date();
 load();
 </script>
